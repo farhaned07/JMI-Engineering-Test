@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Port of wind_for_life/apps/anemometers/api/views.py::ReadingViewSet.
@@ -23,8 +24,8 @@ use Illuminate\Support\Facades\DB;
  * list+retrieve (read shape) while StoreReadingRequest / UpdateReadingRequest
  * accept the `anemometer` FK input (write shape: WriteReadingMinimalSerializer).
  *
- * Note: Django main has NO export action and NO `anemometer=` filter — neither
- * is implemented here (intentional Part-1 gap).
+ * Note: Django main has NO `anemometer=` filter — it is not implemented here
+ * to preserve parity with the original project structure.
  */
 class ReadingController extends Controller
 {
@@ -45,6 +46,53 @@ class ReadingController extends Controller
             $readings,
             fn (Reading $r) => (new ReadingResource($r))->resolve(),
         );
+    }
+
+    /**
+     * GET /api/readings/export — export readings as JSON or CSV.
+     */
+    public function export(Request $request): JsonResponse|StreamedResponse
+    {
+        $validated = $request->validate([
+            'format' => ['sometimes', 'string', 'in:json,csv'],
+            'tags_any' => ['sometimes', 'string'],
+            'tags_exact' => ['sometimes', 'string'],
+        ]);
+
+        $format = $validated['format'] ?? 'json';
+
+        $query = ReadingFilter::apply(
+            Reading::query(),
+            $request->only(['tags_any', 'tags_exact']),
+        )->with('tags');
+
+        if ($format === 'json') {
+            $readings = $query->get()
+                ->map(fn (Reading $reading) => (new ReadingResource($reading))->resolve());
+
+            return response()->json($readings);
+        }
+
+        return response()->streamDownload(function () use ($query): void {
+            $handle = fopen('php://output', 'w');
+
+            fputcsv($handle, ['id', 'speed', 'recorded_at', 'tags']);
+
+            $query->chunk(500, function ($readings) use ($handle): void {
+                foreach ($readings as $reading) {
+                    fputcsv($handle, [
+                        $reading->id,
+                        $reading->speed,
+                        optional($reading->recorded_at)->toJSON(),
+                        $reading->tags->pluck('name')->implode(';'),
+                    ]);
+                }
+            });
+
+            fclose($handle);
+        }, 'readings-export.csv', [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+        ]);
     }
 
     /**
