@@ -13,7 +13,6 @@ use Illuminate\Support\Facades\Route;
 |--------------------------------------------------------------------------
 |
 | Intentionally omitted (parity with the `main` branch of the Django repo):
-|   - GET /api/readings/export  (Part-1 gap the candidate fills)
 |   - ?anemometer= filter on /api/readings
 |
 */
@@ -36,6 +35,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('anemometers/{anemometer}/readings', [AnemometerReadingController::class, 'index']);
     Route::get('anemometers/{anemometer}/readings/{reading}', [AnemometerReadingController::class, 'show']);
 
-    // readings (NO export route)
+    // readings
+    Route::get('readings/export', [ReadingController::class, 'export']);
     Route::apiResource('readings', ReadingController::class);
 });
